@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,8 +19,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { saveTrialData } from "@/lib/firebase";
+import { MonitorPlay } from "lucide-react";
 
 type Trial = {
   participant_id: string;
@@ -34,41 +38,67 @@ type GameState = "instructions" | "waiting" | "stimulus" | "too_early" | "result
 
 const TOTAL_TRIALS = 30;
 
-const InstructionsScreen = ({ onStartTest }: { onStartTest: () => void }) => (
-  <Card className="w-full max-w-2xl animate-in fade-in duration-500">
-    <CardHeader>
-      <CardTitle className="font-headline text-4xl">ReactiFast</CardTitle>
-      <CardDescription className="font-headline">
-        Welcome to the Reaction Time Test.
-      </CardDescription>
-    </CardHeader>
-    <CardContent className="space-y-4">
-      <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
-        <li>Keep your eyes on the screen at all times.</li>
-        <li>Only click when the screen changes color.</li>
-        <li>Do not try to predict the change — wait for it.</li>
-        <li>Respond as quickly as possible after the change.</li>
-        <li>The test includes {TOTAL_TRIALS} attempts.</li>
-      </ol>
-    </CardContent>
-    <CardFooter>
-      <Button
-        size="lg"
-        onClick={onStartTest}
-        className="w-full bg-accent hover:bg-accent/90 text-accent-foreground font-headline"
-      >
-        Start Test
-      </Button>
-    </CardFooter>
-  </Card>
-);
+const InstructionsScreen = ({ onStartTest }: { onStartTest: (participantId: string) => void }) => {
+  const [participantId, setParticipantId] = React.useState("");
+  
+  return (
+    <Card className="w-full max-w-2xl animate-in fade-in duration-500 border-primary/20 shadow-lg shadow-primary/10">
+      <CardHeader>
+        <div className="flex items-center space-x-4">
+          <MonitorPlay className="h-12 w-12 text-primary" />
+          <div>
+            <CardTitle className="font-headline text-4xl text-primary-foreground">ReactiFast</CardTitle>
+            <CardDescription className="font-headline text-muted-foreground">
+              Welcome to the Reaction Time Test.
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div>
+          <h3 className="font-headline text-lg mb-2">Instructions</h3>
+          <ol className="list-decimal list-inside space-y-2 text-muted-foreground">
+            <li>Keep your eyes on the screen at all times.</li>
+            <li>Only click when the screen changes from black to white.</li>
+            <li>Do not try to predict the change — wait for it.</li>
+            <li>Respond as quickly as possible after the change.</li>
+            <li>The test includes {TOTAL_TRIALS} attempts.</li>
+          </ol>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="participant-id" className="font-headline">Enter Your Name or ID</Label>
+          <Input
+            id="participant-id"
+            value={participantId}
+            onChange={(e) => setParticipantId(e.target.value)}
+            placeholder="e.g., subject_01"
+            className="bg-secondary border-primary/30"
+          />
+        </div>
+      </CardContent>
+      <CardFooter>
+        <Button
+          size="lg"
+          onClick={() => onStartTest(participantId)}
+          disabled={!participantId.trim()}
+          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-headline"
+        >
+          Start Test
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+};
+
 
 const ResultsScreen = ({
   trials,
   onTryAgain,
+  participantId,
 }: {
   trials: Trial[];
   onTryAgain: () => void;
+  participantId: string;
 }) => {
   const validTrials = trials.filter((t) => !t.premature_click && t.reaction_time_ms > 0);
   const reactionTimes = validTrials.map((t) => t.reaction_time_ms);
@@ -88,12 +118,27 @@ const ResultsScreen = ({
             (reactionTimes.length - 1)
         )
       : 0;
+  
+  const handleExport = () => {
+    const dataForExport = trials.map((trial) => ({
+      "Trial Number": trial.trial_number,
+      "Reaction Time (ms)": trial.premature_click ? "-" : trial.reaction_time_ms,
+      "Stimulus Interval (s)": trial.stimulus_interval_s.toFixed(2),
+      "Was Error": trial.premature_click ? "Yes" : "No",
+      Timestamp: trial.timestamp,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(dataForExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Results");
+    XLSX.writeFile(workbook, `${participantId || "results"}.xlsx`);
+  };
 
   return (
     <Card className="w-full max-w-4xl animate-in fade-in duration-700">
       <CardHeader>
         <CardTitle className="font-headline text-4xl">Test Complete</CardTitle>
-        <CardDescription>Here are your results.</CardDescription>
+        <CardDescription>Results for: <span className="font-bold text-primary">{participantId}</span></CardDescription>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 text-center">
@@ -139,9 +184,12 @@ const ResultsScreen = ({
           </Table>
         </div>
       </CardContent>
-      <CardFooter>
-        <Button onClick={onTryAgain} className="w-full font-headline" size="lg">
+      <CardFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 mt-4">
+        <Button onClick={onTryAgain} className="w-full sm:w-auto font-headline" size="lg">
           Try Again
+        </Button>
+        <Button onClick={handleExport} className="w-full sm:w-auto font-headline" variant="outline">
+          Export to Excel
         </Button>
       </CardFooter>
     </Card>
@@ -155,16 +203,21 @@ export default function Home() {
   const [participantId, setParticipantId] = React.useState<string>("");
   const [currentTimeout, setCurrentTimeout] =
     React.useState<NodeJS.Timeout | null>(null);
+  const [tooEarlyTimeout, setTooEarlyTimeout] =
+    React.useState<NodeJS.Timeout | null>(null);
   const [stimulusInterval, setStimulusInterval] = React.useState(0);
-
-  React.useEffect(() => {
-    setParticipantId(crypto.randomUUID());
-  }, []);
 
   const resetTest = () => {
     if (currentTimeout) clearTimeout(currentTimeout);
+    if (tooEarlyTimeout) clearTimeout(tooEarlyTimeout);
     setTrials([]);
+    setParticipantId("");
     setGameState("instructions");
+  };
+
+  const startTest = (id: string) => {
+    setParticipantId(id);
+    setGameState("waiting");
   };
 
   const startNextTrial = () => {
@@ -189,9 +242,11 @@ export default function Home() {
     saveTrialData(newTrial);
     setTrials((prev) => [...prev, newTrial]);
     setGameState("too_early");
-    setTimeout(() => {
+
+    const timeoutId = setTimeout(() => {
        startNextTrial();
     }, 2000);
+    setTooEarlyTimeout(timeoutId);
   };
 
   const handleReaction = () => {
@@ -230,9 +285,9 @@ export default function Home() {
   const renderContent = () => {
     switch (gameState) {
       case "instructions":
-        return <InstructionsScreen onStartTest={() => setGameState("waiting")} />;
+        return <InstructionsScreen onStartTest={startTest} />;
       case "results":
-        return <ResultsScreen trials={trials} onTryAgain={resetTest} />;
+        return <ResultsScreen trials={trials} onTryAgain={resetTest} participantId={participantId} />;
       case "waiting":
       case "stimulus":
       case "too_early":
