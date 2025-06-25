@@ -37,10 +37,19 @@ type Trial = {
 
 type GameState = "instructions" | "waiting" | "stimulus" | "results" | "premature_end";
 
-const InstructionsScreen = ({ onStartTest }: { onStartTest: (participantId: string, totalTrials: number) => void }) => {
-  const [participantId, setParticipantId] = React.useState("");
-  const [numberOfTrials, setNumberOfTrials] = React.useState(30);
-  
+const InstructionsScreen = ({
+  participantId,
+  setParticipantId,
+  trialsInput,
+  setTrialsInput,
+  onStartTest,
+}: {
+  participantId: string;
+  setParticipantId: (id: string) => void;
+  trialsInput: string;
+  setTrialsInput: (trials: string) => void;
+  onStartTest: () => void;
+}) => {
   return (
     <Card className="w-full max-w-2xl animate-in fade-in duration-500 border-primary/20 shadow-lg shadow-primary/10">
       <CardHeader>
@@ -62,7 +71,7 @@ const InstructionsScreen = ({ onStartTest }: { onStartTest: (participantId: stri
             <li>Only click when the screen changes from black to white.</li>
             <li>Do not try to predict the change — wait for it.</li>
             <li>Respond as quickly as possible after the change.</li>
-            <li>The test includes {numberOfTrials} attempts.</li>
+            <li>The test includes {parseInt(trialsInput, 10) || 0} attempts.</li>
           </ol>
         </div>
         <div className="space-y-2">
@@ -80,8 +89,8 @@ const InstructionsScreen = ({ onStartTest }: { onStartTest: (participantId: stri
           <Input
             id="number-of-trials"
             type="number"
-            value={numberOfTrials}
-            onChange={(e) => setNumberOfTrials(parseInt(e.target.value, 10) || 1)}
+            value={trialsInput}
+            onChange={(e) => setTrialsInput(e.target.value)}
             min="1"
             placeholder="e.g., 30"
             className="bg-secondary border-primary/30"
@@ -91,8 +100,8 @@ const InstructionsScreen = ({ onStartTest }: { onStartTest: (participantId: stri
       <CardFooter>
         <Button
           size="lg"
-          onClick={() => onStartTest(participantId, numberOfTrials)}
-          disabled={!participantId.trim() || numberOfTrials <= 0}
+          onClick={onStartTest}
+          disabled={!participantId.trim() || !trialsInput.trim() || parseInt(trialsInput, 10) <= 0}
           className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-headline"
         >
           Start Test
@@ -229,19 +238,30 @@ export default function Home() {
     React.useState<NodeJS.Timeout | null>(null);
   const [stimulusInterval, setStimulusInterval] = React.useState(0);
   const [totalTrials, setTotalTrials] = React.useState(30);
+  const [trialsInput, setTrialsInput] = React.useState<string>("30");
 
   const resetTest = () => {
     if (currentTimeout) clearTimeout(currentTimeout);
     setTrials([]);
     setParticipantId("");
+    setTotalTrials(30);
+    setTrialsInput("30");
     setGameState("instructions");
   };
 
-  const startTest = (id: string, trialsCount: number) => {
-    setParticipantId(id);
+  const restartFromPrematureClick = () => {
+    if (currentTimeout) clearTimeout(currentTimeout);
     setTrials([]);
-    setTotalTrials(trialsCount);
-    setGameState("waiting");
+    setGameState("instructions");
+  };
+
+  const startTest = () => {
+    const trialsCount = parseInt(trialsInput, 10);
+    if (participantId.trim() && !isNaN(trialsCount) && trialsCount > 0) {
+      setTotalTrials(trialsCount);
+      setTrials([]);
+      setGameState("waiting");
+    }
   };
 
   const handlePrematureClick = () => {
@@ -260,12 +280,13 @@ export default function Home() {
       premature_click: false,
     };
     saveTrialData(newTrial);
+
+    const updatedTrials = [...trials, newTrial];
+    setTrials(updatedTrials);
     
-    if (trials.length + 1 >= totalTrials) {
-        setTrials((prev) => [...prev, newTrial]);
+    if (updatedTrials.length >= totalTrials) {
         setGameState("results");
     } else {
-        setTrials((prev) => [...prev, newTrial]);
         setGameState("waiting");
     }
   };
@@ -292,11 +313,19 @@ export default function Home() {
   const renderContent = () => {
     switch (gameState) {
       case "instructions":
-        return <InstructionsScreen onStartTest={startTest} />;
+        return (
+          <InstructionsScreen
+            onStartTest={startTest}
+            participantId={participantId}
+            setParticipantId={setParticipantId}
+            trialsInput={trialsInput}
+            setTrialsInput={setTrialsInput}
+          />
+        );
       case "results":
         return <ResultsScreen trials={trials} onTryAgain={resetTest} participantId={participantId} />;
       case "premature_end":
-        return <PrematureEndScreen onRestart={resetTest} />;
+        return <PrematureEndScreen onRestart={restartFromPrematureClick} />;
       case "waiting":
       case "stimulus":
         return (
