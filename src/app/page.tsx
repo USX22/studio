@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -34,7 +35,7 @@ type Trial = {
   premature_click: boolean;
 };
 
-type GameState = "instructions" | "waiting" | "stimulus" | "too_early" | "results";
+type GameState = "instructions" | "waiting" | "stimulus" | "results" | "premature_end";
 
 const TOTAL_TRIALS = 30;
 
@@ -90,7 +91,6 @@ const InstructionsScreen = ({ onStartTest }: { onStartTest: (participantId: stri
   );
 };
 
-
 const ResultsScreen = ({
   trials,
   onTryAgain,
@@ -123,7 +123,7 @@ const ResultsScreen = ({
     const dataForExport = trials.map((trial) => ({
       "Trial Number": trial.trial_number,
       "Reaction Time (ms)": trial.premature_click ? "-" : trial.reaction_time_ms,
-      "Stimulus Interval (s)": trial.stimulus_interval_s.toFixed(2),
+      "Stimulus Interval (s)": trial.stimulus_interval_s,
       "Was Error": trial.premature_click ? "Yes" : "No",
       Timestamp: trial.timestamp,
     }));
@@ -174,7 +174,7 @@ const ResultsScreen = ({
                   <TableCell>
                     {trial.premature_click ? "-" : trial.reaction_time_ms}
                   </TableCell>
-                  <TableCell>{trial.stimulus_interval_s.toFixed(2)}</TableCell>
+                  <TableCell>{trial.stimulus_interval_s}</TableCell>
                   <TableCell className={cn(trial.premature_click && "text-destructive")}>
                     {trial.premature_click ? "Premature Click" : "-"}
                   </TableCell>
@@ -196,6 +196,19 @@ const ResultsScreen = ({
   );
 };
 
+const PrematureEndScreen = ({ onRestart }: { onRestart: () => void }) => {
+  return (
+    <div className="fixed inset-0 bg-black flex flex-col items-center justify-center text-white p-4 animate-in fade-in">
+      <h1 className="text-5xl font-headline text-destructive mb-8">
+        Te has adelantado
+      </h1>
+      <Button onClick={onRestart} size="lg" className="font-headline">
+        Reiniciar prueba
+      </Button>
+    </div>
+  );
+};
+
 export default function Home() {
   const [gameState, setGameState] = React.useState<GameState>("instructions");
   const [trials, setTrials] = React.useState<Trial[]>([]);
@@ -203,13 +216,10 @@ export default function Home() {
   const [participantId, setParticipantId] = React.useState<string>("");
   const [currentTimeout, setCurrentTimeout] =
     React.useState<NodeJS.Timeout | null>(null);
-  const [tooEarlyTimeout, setTooEarlyTimeout] =
-    React.useState<NodeJS.Timeout | null>(null);
   const [stimulusInterval, setStimulusInterval] = React.useState(0);
 
   const resetTest = () => {
     if (currentTimeout) clearTimeout(currentTimeout);
-    if (tooEarlyTimeout) clearTimeout(tooEarlyTimeout);
     setTrials([]);
     setParticipantId("");
     setGameState("instructions");
@@ -217,36 +227,13 @@ export default function Home() {
 
   const startTest = (id: string) => {
     setParticipantId(id);
+    setTrials([]);
     setGameState("waiting");
-  };
-
-  const startNextTrial = () => {
-    if (trials.length >= TOTAL_TRIALS) {
-      setGameState("results");
-    } else {
-      setGameState("waiting");
-    }
   };
 
   const handlePrematureClick = () => {
     if (currentTimeout) clearTimeout(currentTimeout);
-    
-    const newTrial: Trial = {
-      participant_id: participantId,
-      timestamp: new Date().toISOString(),
-      trial_number: trials.length + 1,
-      reaction_time_ms: 0,
-      stimulus_interval_s: stimulusInterval,
-      premature_click: true,
-    };
-    saveTrialData(newTrial);
-    setTrials((prev) => [...prev, newTrial]);
-    setGameState("too_early");
-
-    const timeoutId = setTimeout(() => {
-       startNextTrial();
-    }, 2000);
-    setTooEarlyTimeout(timeoutId);
+    setGameState("premature_end");
   };
 
   const handleReaction = () => {
@@ -260,14 +247,21 @@ export default function Home() {
       premature_click: false,
     };
     saveTrialData(newTrial);
-    setTrials((prev) => [...prev, newTrial]);
-    startNextTrial();
+    
+    if (trials.length + 1 >= TOTAL_TRIALS) {
+        setTrials((prev) => [...prev, newTrial]);
+        setGameState("results");
+    } else {
+        setTrials((prev) => [...prev, newTrial]);
+        setGameState("waiting");
+    }
   };
 
   React.useEffect(() => {
     if (gameState === "waiting") {
-      const randomDelay = Math.random() * 9000 + 1000; // 1-10 seconds
-      setStimulusInterval(Number((randomDelay / 1000).toFixed(2)));
+      const randomDelaySeconds = Math.floor(Math.random() * 10) + 1; // 1-10 seconds
+      const randomDelay = randomDelaySeconds * 1000;
+      setStimulusInterval(randomDelaySeconds);
 
       const timeoutId = setTimeout(() => {
         setStartTime(Date.now());
@@ -288,14 +282,15 @@ export default function Home() {
         return <InstructionsScreen onStartTest={startTest} />;
       case "results":
         return <ResultsScreen trials={trials} onTryAgain={resetTest} participantId={participantId} />;
+      case "premature_end":
+        return <PrematureEndScreen onRestart={resetTest} />;
       case "waiting":
       case "stimulus":
-      case "too_early":
         return (
           <div
             className={cn(
               "fixed inset-0 cursor-pointer",
-              (gameState === "waiting" || gameState === "too_early") && "bg-black",
+              gameState === "waiting" && "bg-black",
               gameState === "stimulus" && "bg-white"
             )}
             onClick={
@@ -305,15 +300,7 @@ export default function Home() {
                 ? handleReaction
                 : undefined
             }
-          >
-            {gameState === "too_early" && (
-              <div className="flex h-full w-full items-center justify-center animate-in fade-in">
-                <p className="text-white text-3xl md:text-5xl font-headline text-center p-4">
-                  Too early. Wait for the change.
-                </p>
-              </div>
-            )}
-          </div>
+          />
         );
       default:
         return null;
